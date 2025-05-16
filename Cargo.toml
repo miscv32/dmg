@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+[features]
+enable_echo_ram_emulation = []
+enable_FEA0_FEFF_range_emulation = []
