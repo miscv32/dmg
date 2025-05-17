@@ -1,3 +1,5 @@
+use crate::cpu;
+use crate::ram;
 pub enum InstructionName {
     Nop,
     LdPtrU16Sp,
@@ -16,6 +18,31 @@ pub enum InstructionName {
 }
 pub struct Instruction {
     pub _name: InstructionName,
+}
+
+pub type MicroOp = fn(&mut cpu::CPU, &mut ram::RAM);
+
+fn nop_m1(_cpu: &mut cpu::CPU, _ram: &mut ram::RAM) {
+    println!("nop_m1");
+    _cpu.stage = cpu::CPUStage::FetchDecode;
+}
+
+fn nop_m2(cpu: &mut cpu::CPU, _ram: &mut ram::RAM) {
+    println!("nop_m2");
+    cpu.register_file.pc += 1;
+}
+
+impl Instruction {
+    pub fn micro_ops(&self) -> Result<Vec<MicroOp>, DecodeError> {
+        match self._name {
+            InstructionName::Nop => {
+                return Ok(vec![nop_m1, nop_m2])
+            },
+            _ => {
+                return Err(DecodeError::UnimplementedOpcode)
+            },
+        }
+    }
 }
 
 pub enum DecodeError {

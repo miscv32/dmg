@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::ram;
 use crate::decode;
 use crate::decode::Opcode;
@@ -33,6 +35,7 @@ pub struct CPU {
     pub running: bool,
     pub stage: CPUStage,
     pub current_instruction: decode::Instruction,
+    pub queue: VecDeque<decode::MicroOp>
 }    
 
 
@@ -61,6 +64,7 @@ pub fn init() -> CPU {
         running: true,
         stage: CPUStage::FetchDecode,
         current_instruction: decode::Instruction {_name: decode::InstructionName::Nop},
+        queue: VecDeque::from([]),
     };
     
 }
@@ -70,6 +74,7 @@ pub enum CPUError {
     IllegalFetch,
     IllegalOpcode,
     UnimplementedOpcode,
+    EmptyMicroOpQueue,
 }
 
 impl CPU {
@@ -78,6 +83,8 @@ impl CPU {
         match self.stage {
             // Fetch/Decode state
             CPUStage::FetchDecode => {
+                println!("fetch decode stage");
+
                 // Fetch and decode next instruction
                 let opcode: u8;
 
@@ -94,7 +101,23 @@ impl CPU {
                 }
 
                 match opcode.decode_instruction() {
-                    Ok(instruction) => self.current_instruction = instruction, // TODO push all operations to queue
+                    Ok(instruction) => { 
+                        self.current_instruction = instruction;
+                        let micro_ops_result: Result<Vec<fn(&mut CPU, &mut ram::RAM)>, decode::DecodeError> = self.current_instruction.micro_ops();
+                        let micro_ops: Vec<fn(&mut CPU, &mut ram::RAM)>;
+                        match micro_ops_result {
+                            Ok(val) => micro_ops = val,
+                            Err(_) => return Err(CPUError::UnimplementedOpcode),
+                        }
+
+                        for micro_op in micro_ops {
+                            self.queue.push_back(micro_op);
+                            println!("push to queue")
+                        }
+                        
+                        self.stage = CPUStage::Execute; // note that the stage value may be immediately overwritten by the next micro-operation
+
+                    }, // TODO push all operations to queue
                     Err(decode::DecodeError::IllegalOpcode) => {
                         println!("Illegal opcode encountered");
                         return Err(CPUError::IllegalOpcode)
@@ -105,22 +128,34 @@ impl CPU {
                     }
                 }
 
-                // TODO F/D/E overlap: Execute anything left on queue 
-                // will simulates fetch/execute overlap, 
-                // one micro-op should be to trigger a fetch-execute before the last m cycle of an instruction, 
-                // so that the F/D stage of the next instruction overlaps with the last mcycle of the previous instruction. 
-                // see gbctr
+                // simulate F/D/E overlap: Execute the one micro-op left on queue from the previous operation
+                // The penultimate (and no other) micro-op must trigger a fetch-execute, otherwise the pipeline gets messed up.
+                if let Some(value) = self.execute_micro_op(ram) {
+                    return value;
+                }
 
-                // Start executing
-                self.stage = CPUStage::Execute;
             },
-            // TODO implement Execute stage and micro op queue
+
             CPUStage::Execute => {
                 // pop a micro op from the queue and execute
-                // if the operation errors then handle it.
+                println!("execute stage");
+                if let Some(value) = self.execute_micro_op(ram) {
+                    return value;
+                }
             }
         }
 
         return Ok(());
+    }
+
+    fn execute_micro_op(&mut self, ram: &mut ram::RAM) -> Option<Result<(), CPUError>> {
+        let micro_op_option: Option<fn(&mut CPU, &mut ram::RAM)> = self.queue.pop_front();
+        let micro_op_fn_ptr: fn(&mut CPU, &mut ram::RAM);
+        match micro_op_option {
+            Some(x) => micro_op_fn_ptr = x,
+            None => return Some(Err(CPUError::EmptyMicroOpQueue)),
+        }
+        micro_op_fn_ptr(self, ram);
+        None
     }
 }

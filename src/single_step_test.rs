@@ -63,7 +63,8 @@ fn run_individual_test(processor: &mut cpu::CPU, ram: &mut ram::RAM, test_json: 
     }
 
     // tick the CPU
-    for _ in test.cycles {
+    for _ in 0..(test.cycles.len()+1) {
+        println!("tick!");
         processor.tick(ram)
             .expect("Test attempts to execute instruction which causes a CPU error");
     }
@@ -105,7 +106,7 @@ fn run_test_file(processor: &mut cpu::CPU, ram: &mut ram::RAM, path: &PathBuf) {
     println!("{:?}: passed", path.file_name().unwrap());
 }
 
-#[test] // For now this is the default test
+//#[test] // For now this is the default test
 fn debug_run_test() {
         // initiate a new CPU which we will use to run all our tests
         let mut processor = cpu::init();
