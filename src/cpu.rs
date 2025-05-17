@@ -65,6 +65,7 @@ pub fn init() -> CPU {
     
 }
 
+#[derive(Debug)]
 pub enum CPUError {
     IllegalFetch,
     IllegalOpcode,

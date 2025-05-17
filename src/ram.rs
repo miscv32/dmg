@@ -9,11 +9,13 @@ pub struct RAM {
     buf: [RAMValue; RAM_SIZE],
 }
 
+#[derive(Debug)]
 pub enum _WriteError {
     AddressDoesNotExist,
     AddressUnwriteable, // address exists but cannot be written to
 }
 
+#[derive(Debug)]
 pub enum ReadError {
     AddressDoesNotExist,
     AddressUnreadable, // address exists but cannot be read from
@@ -26,7 +28,7 @@ impl RAM {
             return Err(_WriteError::AddressDoesNotExist);
         }
 
-        if 0xE000 <= address || address <= 0xFDFF { 
+        if 0xE000 <= address && address <= 0xFDFF { 
         // Echo RAM
             if cfg!(feature = "enable_echo_ram_emulation") { 
                 return self._write(value, address - 0xC000); 
@@ -35,7 +37,7 @@ impl RAM {
             }
         }
 
-        if 0xFEA0 <= address || address <= 0xFEFF { 
+        if 0xFEA0 <= address && address <= 0xFEFF { 
         // Prohibited area. 
         // TODO simulate DMG OAM corruption in instruction logic 
         // https://gbdev.io/pandocs/OAM_Corruption_Bug.html#oam-corruption-bug

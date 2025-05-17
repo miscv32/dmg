@@ -2,6 +2,7 @@ mod cpu;
 mod ram;
 mod util;
 mod decode;
+mod single_step_test;
 
 fn main() {
     // Initialise CPU internals.
