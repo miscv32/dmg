@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 
-use crate::ram;
 use crate::decode;
 use crate::decode::Opcode;
+use crate::ram;
 
 pub struct RegisterFile {
     pub _af: u16,
@@ -12,9 +12,11 @@ pub struct RegisterFile {
     pub _sp: u16,
     pub pc: u16,
     pub _ime: bool,
+    pub z: u8, // used for intermediate stages of instructions
+    pub w: u8, // likewise
 }
 
-pub struct Flags {  
+pub struct Flags {
 // In hardware, flags are actually stored in the upper 4 bits of register F.
 // It's easier for us to store them seperately, and update the actual F register lazily.
     pub _carry: bool,
@@ -35,12 +37,11 @@ pub struct CPU {
     pub running: bool,
     pub stage: CPUStage,
     pub current_instruction: decode::Instruction,
-    pub queue: VecDeque<decode::MicroOp>
-}    
-
+    pub queue: VecDeque<decode::MicroOp>,
+}
 
 pub fn init() -> CPU {
-// Return an initialised CPU struct
+    // Return an initialised CPU struct
     let register_file: RegisterFile = RegisterFile {
         _af: 0,
         _bc: 0,
@@ -48,7 +49,9 @@ pub fn init() -> CPU {
         _hl: 0,
         _sp: 0,
         pc: 0,
-        _ime: false
+        _ime: false,
+        z: 0,
+        w: 0,
     };
 
     let flags: Flags = Flags {
@@ -57,16 +60,17 @@ pub fn init() -> CPU {
         _subtraction: false,
         _zero: false,
     };
-    
+
     return CPU {
         register_file: register_file,
         _flags: flags,
         running: true,
         stage: CPUStage::FetchDecode,
-        current_instruction: decode::Instruction {_name: decode::InstructionName::Nop},
+        current_instruction: decode::Instruction {
+            _name: decode::InstructionName::Nop,
+        },
         queue: VecDeque::from([]),
     };
-    
 }
 
 #[derive(Debug)]
@@ -78,8 +82,8 @@ pub enum CPUError {
 }
 
 impl CPU {
-    pub fn tick (&mut self, ram: &mut ram::RAM) -> Result<(), CPUError> {
-    // Step CPU / RAM by one M-cycle.
+    pub fn tick(&mut self, ram: &mut ram::RAM) -> Result<(), CPUError> {
+        // Step CPU / RAM by one M-cycle.
         // if you try to tick while we aren't running do nothing
         if !self.running {
             return Ok(());
@@ -96,18 +100,21 @@ impl CPU {
                     Ok(byte) => opcode = byte,
                     Err(ram::ReadError::AddressDoesNotExist) => {
                         println!("Illegal fetch: address does not exist");
-                        return Err(CPUError::IllegalFetch)
+                        return Err(CPUError::IllegalFetch);
                     }
                     Err(ram::ReadError::AddressUnreadable) => {
                         println!("Illegal fetch: address exists but cannot be read");
-                        return Err(CPUError::IllegalFetch)
-                    },
+                        return Err(CPUError::IllegalFetch);
+                    }
                 }
 
                 match opcode.decode_instruction() {
-                    Ok(instruction) => { 
+                    Ok(instruction) => {
                         self.current_instruction = instruction;
-                        let micro_ops_result: Result<Vec<fn(&mut CPU, &mut ram::RAM)>, decode::DecodeError> = self.current_instruction.micro_ops();
+                        let micro_ops_result: Result<
+                            Vec<fn(&mut CPU, &mut ram::RAM)>,
+                            decode::DecodeError,
+                        > = self.current_instruction.micro_ops();
                         let micro_ops: Vec<fn(&mut CPU, &mut ram::RAM)>;
                         match micro_ops_result {
                             Ok(val) => micro_ops = val,
@@ -118,17 +125,16 @@ impl CPU {
                             self.queue.push_back(micro_op);
                             println!("push to queue")
                         }
-                        
-                        self.stage = CPUStage::Execute; // note that the stage value may be immediately overwritten by the next micro-operation
 
-                    }, // TODO push all operations to queue
+                        self.stage = CPUStage::Execute; // note that the stage value may be immediately overwritten by the next micro-operation
+                    } // TODO push all operations to queue
                     Err(decode::DecodeError::IllegalOpcode) => {
                         println!("Illegal opcode encountered");
-                        return Err(CPUError::IllegalOpcode)
-                    },
+                        return Err(CPUError::IllegalOpcode);
+                    }
                     Err(decode::DecodeError::UnimplementedOpcode) => {
                         println!("Unimplemented opcode encountered");
-                        return Err(CPUError::UnimplementedOpcode)
+                        return Err(CPUError::UnimplementedOpcode);
                     }
                 }
 
@@ -137,8 +143,7 @@ impl CPU {
                 if let Some(value) = self.execute_micro_op(ram) {
                     return value;
                 }
-
-            },
+            }
 
             CPUStage::Execute => {
                 // pop a micro op from the queue and execute

@@ -1,14 +1,14 @@
 mod cpu;
-mod ram;
-mod util;
 mod decode;
+mod ram;
 mod single_step_test;
+mod util;
 
 fn main() {
     // Initialise CPU internals.
     let mut processor = cpu::init();
 
-    // Initialise RAM. 
+    // Initialise RAM.
     let mut ram: ram::RAM = ram::init();
 
     // Main CPU loop
@@ -19,5 +19,4 @@ fn main() {
             Ok(()) => (),
         }
     }
-
 }
