@@ -1,9 +1,12 @@
 // https://github.com/SingleStepTests/sm83
+// TODO write better log messages across whole project
+// TODO find a way to have each test register as an individual test to cargo, 
+// so that we only get the logs for the test that failed 
+// instead of everything before that getting printed as well
 #[cfg(test)] 
 mod single_step_test {
 use std::ffi::OsString;
 use std::{fs, path::PathBuf};
-
 use crate::cpu;
 use crate::ram;
 use crate::util;
@@ -54,6 +57,8 @@ fn run_individual_test(processor: &mut cpu::CPU, ram: &mut ram::RAM, test_json: 
     processor.register_file._hl = util::_unsigned_16(test.initial.h, test.initial.l);
     processor.register_file._sp = test.initial.sp;
     processor.register_file.pc = test.initial.pc;
+    processor.running = true;
+    processor.stage = cpu::CPUStage::FetchDecode;
 
     // Write to RAM
     for cell in test.initial.ram {
@@ -106,7 +111,7 @@ fn run_test_file(processor: &mut cpu::CPU, ram: &mut ram::RAM, path: &PathBuf) {
     println!("{:?}: passed", path.file_name().unwrap());
 }
 
-//#[test] // For now this is the default test
+#[test] // For now this is the default test
 fn debug_run_test() {
         // initiate a new CPU which we will use to run all our tests
         let mut processor = cpu::init();
@@ -114,11 +119,11 @@ fn debug_run_test() {
         // Initialise RAM. 
         let mut ram: ram::RAM = ram::init();
     
-        let path_string: String = "./sm83/v1/00.json".to_string();
-
-        let path: PathBuf = PathBuf::from(OsString::from(path_string));
-
-        run_test_file(&mut processor, &mut ram, &path);
+        let path_strings: Vec<&str> = vec!["./sm83/v1/76.json", "./sm83/v1/00.json"];
+        for path_string in path_strings {
+            let path: PathBuf = PathBuf::from(OsString::from(path_string));
+            run_test_file(&mut processor, &mut ram, &path);
+        }
 }
 
 // #[test] TODO enable this as the test once all opcodes are implemented. 

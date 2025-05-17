@@ -80,6 +80,10 @@ pub enum CPUError {
 impl CPU {
     pub fn tick (&mut self, ram: &mut ram::RAM) -> Result<(), CPUError> {
     // Step CPU / RAM by one M-cycle.
+        // if you try to tick while we aren't running do nothing
+        if !self.running {
+            return Ok(());
+        }
         match self.stage {
             // Fetch/Decode state
             CPUStage::FetchDecode => {

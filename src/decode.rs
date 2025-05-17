@@ -22,8 +22,7 @@ pub struct Instruction {
 
 pub type MicroOp = fn(&mut cpu::CPU, &mut ram::RAM);
 
-fn nop_m1(_cpu: &mut cpu::CPU, _ram: &mut ram::RAM) {
-    println!("nop_m1");
+fn fetch_execute_overlap(_cpu: &mut cpu::CPU, _ram: &mut ram::RAM) {
     _cpu.stage = cpu::CPUStage::FetchDecode;
 }
 
@@ -32,11 +31,20 @@ fn nop_m2(cpu: &mut cpu::CPU, _ram: &mut ram::RAM) {
     cpu.register_file.pc += 1;
 }
 
+fn halt_m2(cpu: &mut cpu::CPU, _ram: &mut ram::RAM) {
+    println!("halt_m2");
+    cpu.register_file.pc += 1;
+    cpu.running = false;
+}
+
 impl Instruction {
     pub fn micro_ops(&self) -> Result<Vec<MicroOp>, DecodeError> {
         match self._name {
             InstructionName::Nop => {
-                return Ok(vec![nop_m1, nop_m2])
+                return Ok(vec![fetch_execute_overlap, nop_m2])
+            },
+            InstructionName::Halt => {
+                return Ok(vec![fetch_execute_overlap, halt_m2])
             },
             _ => {
                 return Err(DecodeError::UnimplementedOpcode)
@@ -74,7 +82,7 @@ impl Opcode for u8 {
             0xCD => return Ok(Instruction { _name: InstructionName::CallU16 }),
             _ => {
                 // TODO match opcodes which take arguments
-
+                
                 // match illegal opcodes
                 match self {
                     0xD3 | 0xE3 | 0xE4 | 0xF4 | 0xDB | 0xEB | 0xEC | 0xFC | 0xDD | 0xED | 0xFD => return Err(DecodeError::IllegalOpcode),
