@@ -19,6 +19,5 @@ fn main() {
             Ok(()) => (),
         }
     }
-    // TODO look into JSON to save CPU state, so we can use existing tests
 
 }

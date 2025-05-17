@@ -36,12 +36,6 @@ struct SingleStepTest {
     cycles: SingleStepTestsCycles
 }
 
-// TODO implement something to run a SingleStepTest
-// - initial -> update processor state
-// - tick the CPU enough times for thing to finish
-// - compare processor state with final
-// - if there are discrepancies pretty-print them
-
 fn run_individual_test(processor: &mut cpu::CPU, ram: &mut ram::RAM, test_json: &serde_json::Value) {
     
     println!("{}", test_json["name"]);
