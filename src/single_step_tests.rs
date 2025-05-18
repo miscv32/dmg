@@ -1,0 +1,148 @@
+// https://github.com/SingleStepTests/sm83
+
+// TODO rewrite so that we don't just exit on first failure
+
+#[cfg(test)]
+mod single_step_test {
+    use crate::gb;
+    use crate::memory::Memory;
+    use crate::util;
+    use std::ffi::OsString;
+    use std::{fs, path::PathBuf};
+    type SingleStepTestsRam = Vec<(u16, u8)>;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct SingleStepTestsInitial {
+        pc: u16,
+        sp: u16,
+        a: u8,
+        b: u8,
+        c: u8,
+        d: u8,
+        e: u8,
+        f: u8,
+        h: u8,
+        l: u8,
+        ram: SingleStepTestsRam,
+    }
+
+    type SingleStepTestsFinal = SingleStepTestsInitial;
+
+    type SingleStepTestsCycles = Vec<(u16, Option<u16>, String)>;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct SingleStepTest {
+        name: String,
+        initial: SingleStepTestsInitial,
+        r#final: SingleStepTestsFinal,
+        cycles: SingleStepTestsCycles,
+    }
+
+    fn run_individual_test(gameboy: &mut gb::GameBoy, test_json: &serde_json::Value) {
+        println!("{}", test_json["name"]);
+
+        let test: SingleStepTest = serde_json::from_value::<SingleStepTest>(test_json.clone())
+            .expect("Could not deserialise JSON into Rust type");
+
+        // Set up initial state of processor
+        gameboy.registers.a = test.initial.a;
+        gameboy.registers.f = test.initial.f;
+        gameboy.registers.b = test.initial.b;
+        gameboy.registers.c = test.initial.c;
+        gameboy.registers.d = test.initial.d;
+        gameboy.registers.e = test.initial.e;
+        gameboy.registers.h = test.initial.h;
+        gameboy.registers.l = test.initial.l;
+        gameboy.registers.sp = test.initial.sp;
+        gameboy.registers.pc = test.initial.pc;
+        gameboy.running = true;
+        gameboy.cycles_to_idle = Some(0);
+
+        // Write to RAM
+        for cell in test.initial.ram {
+            println!(
+                "RAM write: address: {:#04X}, value: {:#02X}",
+                cell.0, cell.1
+            );
+            gameboy.memory.write(cell.0, cell.1);
+        }
+
+        // tick the CPU
+        for _ in 0..(test.cycles.len() + 1) {
+            gameboy.tick();
+            println!("tock! {:#04X}", gameboy.registers.pc);
+        }
+
+        // Compare the final state of the processor to the test
+        assert_eq!(gameboy.registers.a, test.r#final.a, "A mismatch");
+        assert_eq!(gameboy.registers.f, test.r#final.f);
+        assert_eq!(gameboy.registers.b, test.r#final.b);
+        assert_eq!(gameboy.registers.c, test.r#final.c);
+        assert_eq!(gameboy.registers.d, test.r#final.d);
+        assert_eq!(gameboy.registers.e, test.r#final.e);
+        assert_eq!(gameboy.registers.h, test.r#final.h);
+        assert_eq!(gameboy.registers.l, test.r#final.l);
+        assert_eq!(gameboy.registers.sp, test.r#final.sp, "SP mismatch");
+        assert_eq!(gameboy.registers.pc, test.r#final.pc, "PC mismatch");
+
+        // Compare the final state of RAM to the test
+        for cell in test.r#final.ram {
+            println!("address: {:#04X}, value: {:#02X}", cell.0, cell.1);
+            let ram_value: u8 = gameboy.memory.read(cell.0);
+            assert_eq!(
+                ram_value, cell.1,
+                "RAM mismatch at address {:#04X}: should be {:#02X}, got {:#02X} ",
+                cell.0, cell.1, ram_value
+            );
+        }
+    }
+
+    fn run_test_file(gameboy: &mut gb::GameBoy, path: &PathBuf) {
+        let file_contents: String = fs::read_to_string(path).expect("Could not read test file");
+        let tests_json: serde_json::Value =
+            serde_json::from_str(&file_contents).expect("Could not parse test JSON");
+
+        if let Some(tests_vector) = tests_json.as_array() {
+            for test in tests_vector {
+                run_individual_test(gameboy, test);
+            }
+        } else {
+            println!("Could not parse test JSON as JSON array");
+            assert!(false);
+        }
+
+        println!("{:?}: passed", path.file_name().unwrap());
+    }
+
+    #[test] // For now this is the default test
+    fn debug_run_test() {
+        // initiate a new gameboy struct which we will use to run all our tests
+        let mut gameboy = gb::init();
+
+        let path_strings: Vec<&str> = vec!["./sm83/v1/e0.json"];
+        for path_string in path_strings {
+            let path: PathBuf = PathBuf::from(OsString::from(path_string));
+            run_test_file(&mut gameboy, &path);
+        }
+    }
+
+    // #[test] TODO enable this as the test once all opcodes are implemented.
+    // For now we only want to test individual opcodes at a time, since most instructions are unimplemented
+    fn _run_all_tests() {
+        // initiate a new gameboy struct which we will use to run all our tests
+        let mut gameboy = gb::init();
+
+        match fs::read_dir("./sm83/v1/") {
+            Ok(value) => {
+                let test_paths: fs::ReadDir = value;
+                for test_path in test_paths {
+                    run_test_file(
+                        &mut gameboy,
+                        &test_path.expect("Could not read path").path(),
+                    )
+                }
+            }
+            Err(_) => assert!(false),
+        }
+    }
+}

@@ -1,22 +1,12 @@
-mod cpu;
-mod decode;
-mod ram;
-mod single_step_test;
+mod gb;
+mod memory;
+mod single_step_tests;
 mod util;
-
 fn main() {
-    // Initialise CPU internals.
-    let mut processor = cpu::init();
+    // Initialise CPU internals and RAM.
+    let mut gameboy: gb::GameBoy = gb::init();
 
-    // Initialise RAM.
-    let mut ram: ram::RAM = ram::init();
-
-    // Main CPU loop
-    while processor.running {
-        let result: Result<(), cpu::CPUError> = processor.tick(&mut ram);
-        match result {
-            Err(_) => processor.running = false, // TODO print debug messages
-            Ok(()) => (),
-        }
+    loop {
+        gameboy.tick();
     }
 }
