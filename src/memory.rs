@@ -12,7 +12,6 @@ pub trait Memory {
 }
 
 impl Memory for FlatRAM {
-    // TODO error handle
     fn read(&self, address: u16) -> u8 {
         if (address as usize) >= GB_RAM_SIZE {
             0
@@ -25,7 +24,6 @@ impl Memory for FlatRAM {
         if (address as usize) >= GB_RAM_SIZE {
             ()
         } else {
-            println!("in write {:#04X} {:#02X}", address, data);
             self[address as usize] = data
         }
     }

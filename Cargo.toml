@@ -11,3 +11,7 @@ serde_json = "1.0"
 default = ["enable_echo_ram_emulation", "enable_FEA0_FEFF_range_emulation"]
 enable_echo_ram_emulation = []
 enable_FEA0_FEFF_range_emulation = []
+
+[profile.dev]
+overflow-checks = false # We want addition to behave in the normal way for emulation reasons. 
+# overflow-checks is false in profile.release by default already
