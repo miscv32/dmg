@@ -2,6 +2,7 @@
 use core::panic;
 
 use crate::memory::Memory;
+use crate::util::unsigned_16;
 use crate::{memory, util};
 pub struct Registers {
     pub a: u8,
@@ -22,6 +23,7 @@ pub struct GameBoy {
     pub registers: Registers,
     pub cycles_to_idle: Option<u8>,
     pub memory: memory::FlatRAM,
+    pub ime: bool,
 }
 
 pub fn init() -> GameBoy {
@@ -46,6 +48,7 @@ pub fn init() -> GameBoy {
         registers: registers,
         cycles_to_idle: Some(0),
         memory: memory,
+        ime: false,
     }
 }
 
@@ -89,14 +92,14 @@ impl GameBoy {
         }
     }
 
-    fn _get_flag_n(&self) -> u8 {
+    fn get_flag_n(&self) -> u8 {
         match self.registers.f & 0x40 == 0 {
             true => 0,
             false => 1,
         }
     }
 
-    fn _get_flag_h(&self) -> u8 {
+    fn get_flag_h(&self) -> u8 {
         match self.registers.f & 0x20 == 0 {
             true => 0,
             false => 1,
@@ -137,6 +140,12 @@ impl GameBoy {
                 // Not sure it matters that much, i think only CGB uses this
                 self.running = false;
                 Some(1)
+            }
+            0x18 => {
+                let e = self.memory.read(self.registers.pc) as i8;
+                self.registers.pc += 1;
+                self.registers.pc = (self.registers.pc as i16 + e as i16) as u16;
+                Some(3)
             }
             0x76 => {
                 self.running = false;
@@ -286,7 +295,27 @@ impl GameBoy {
                 self.registers.sp = (self.registers.sp as i16 + e as i16) as u16;
                 Some(4)
             }
-            0xF0 => Some(3),
+            0xEA => {
+                // LD (u16), A
+                let lsb = self.memory.read(self.registers.pc);
+                self.registers.pc += 1;
+                let msb = self.memory.read(self.registers.pc);
+                self.registers.pc += 1;
+                self.memory
+                    .write(util::unsigned_16(msb, lsb), self.registers.a);
+                Some(4)
+            }
+            0xF0 => {
+                // LD A FF00 + u8
+                let lsb = self.memory.read(self.registers.pc);
+                self.registers.pc += 1;
+                self.registers.a = self.memory.read(util::unsigned_16(0xFF, lsb));
+                Some(3)
+            }
+            0xF2 => {
+                self.registers.a = self.memory.read(util::unsigned_16(0xFF, self.registers.c));
+                Some(2)
+            }
             0xF8 => {
                 // LD HL SP + i8
                 let e: i8 = self.memory.read(self.registers.pc) as i8;
@@ -304,9 +333,11 @@ impl GameBoy {
                 self.registers.sp = self.get_hl();
                 Some(2)
             }
-            0xE2 => Some(2),
-            0xEA => Some(4),
-            0xF2 => Some(2),
+            0xE2 => {
+                self.memory
+                    .write(util::unsigned_16(0xFF, self.registers.c), self.registers.a);
+                Some(2)
+            }
             0xFA => {
                 let lsb = self.memory.read(self.registers.pc);
                 self.registers.pc += 1;
@@ -315,7 +346,21 @@ impl GameBoy {
                 self.registers.a = self.memory.read(util::unsigned_16(msb, lsb));
                 Some(4)
             }
-            0xCD => Some(6),
+            0xCD => {
+                // CALL u16
+                let lsb = self.memory.read(self.registers.pc);
+                self.registers.pc += 1;
+                let msb = self.memory.read(self.registers.pc);
+                self.registers.pc += 1;
+                self.registers.sp -= 1;
+                self.memory
+                    .write(self.registers.sp, util::msb(self.registers.pc));
+                self.registers.sp -= 1;
+                self.memory
+                    .write(self.registers.sp, util::lsb(self.registers.pc));
+                self.registers.pc = util::unsigned_16(msb, lsb);
+                Some(6)
+            }
             _ => {
                 match opcode >> 6 {
                     0b00 => {
@@ -332,13 +377,13 @@ impl GameBoy {
                             }
                             0b0011 => {
                                 // INC r16
-                                let r16_value = self.get_r16_group_2(r16);
+                                let r16_value = self.get_r16_group_1(r16);
                                 self.set_r16_group_1(r16, r16_value + 1);
                                 Some(1)
                             }
                             0b1011 => {
                                 // DEC r16
-                                let r16_value = self.get_r16_group_2(r16);
+                                let r16_value = self.get_r16_group_1(r16);
                                 self.set_r16_group_1(r16, r16_value - 1);
                                 Some(1)
                             }
@@ -357,9 +402,7 @@ impl GameBoy {
                                 // LD (r16), A
                                 let r16_value = self.get_r16_group_2(r16);
                                 self.memory.write(r16_value, self.registers.a);
-                                if r16 == 3 {
-                                    self.set_hl(self.get_hl() + 1);
-                                }
+
                                 Some(2)
                             }
                             0b1010 => {
@@ -413,6 +456,69 @@ impl GameBoy {
                                                 self.set_flag_z(false);
                                                 Some(1)
                                             }
+                                            1 => {
+                                                // RRCA
+                                                let ls_bit = self.registers.a & 1;
+                                                self.registers.a =
+                                                    (self.registers.a >> 1) | (ls_bit << 7);
+                                                self.set_flag_c(ls_bit != 0);
+                                                self.set_flag_n(false);
+                                                self.set_flag_h(false);
+                                                self.set_flag_z(false);
+                                                Some(1)
+                                            }
+                                            2 => {
+                                                // RLA
+                                                let msb = (self.registers.a & 0x80);
+                                                self.registers.a =
+                                                    (self.registers.a << 1) | self.get_flag_c();
+                                                self.set_flag_c(msb != 0);
+                                                self.set_flag_z(false);
+                                                self.set_flag_n(false);
+                                                self.set_flag_h(false);
+                                                Some(1)
+                                            }
+                                            3 => {
+                                                // RRA
+                                                let lsb = (self.registers.a & 1);
+                                                self.registers.a = (self.registers.a >> 1)
+                                                    | (self.get_flag_c() << 7);
+                                                self.set_flag_c(lsb != 0);
+                                                self.set_flag_z(false);
+                                                self.set_flag_n(false);
+                                                self.set_flag_h(false);
+                                                Some(1)
+                                            }
+                                            4 => {
+                                                // DAA
+                                                if self.get_flag_n() != 0 {
+                                                    let mut adjustment = 0;
+                                                    if self.get_flag_h() != 0 {
+                                                        adjustment += 6;
+                                                    }
+                                                    if self.get_flag_c() != 0 {
+                                                        adjustment += 0x60
+                                                    }
+                                                    self.registers.a -= adjustment;
+                                                } else {
+                                                    let mut adjustment = 0;
+                                                    if (self.get_flag_h() != 0)
+                                                        || ((self.registers.a & 0xF) > 9)
+                                                    {
+                                                        adjustment += 6;
+                                                    }
+                                                    if (self.get_flag_c() != 0)
+                                                        || (self.registers.a > 0x99)
+                                                    {
+                                                        adjustment += 0x60;
+                                                        self.set_flag_c(true);
+                                                    }
+                                                    self.registers.a += adjustment;
+                                                }
+                                                self.set_flag_z(self.registers.a == 0);
+                                                self.set_flag_h(false);
+                                                Some(1)
+                                            }
                                             5 => {
                                                 // CPL
                                                 self.registers.a = !self.registers.a;
@@ -431,7 +537,7 @@ impl GameBoy {
                                                 // CCF
                                                 self.set_flag_n(false);
                                                 self.set_flag_h(false);
-                                                self.set_flag_c(!self.get_flag_c() != 0);
+                                                self.set_flag_c(self.get_flag_c() == 0);
                                                 Some(1)
                                             }
                                             _ => None,
@@ -479,6 +585,7 @@ impl GameBoy {
                         // ALU A, r8
                         match (opcode >> 3) & 0b111 {
                             0 => {
+                                // ADD
                                 let r8: u8 = opcode & 0b111;
                                 let left: u8 = self.registers.a;
                                 let right: u8 = self.get_r8(r8);
@@ -490,6 +597,7 @@ impl GameBoy {
                                 Some(1)
                             }
                             1 => {
+                                // ADC
                                 let r8: u8 = opcode & 0b111;
                                 let c_save: u8 = self.get_flag_c();
                                 let left: u8 = self.registers.a;
@@ -516,6 +624,7 @@ impl GameBoy {
                                 Some(1)
                             }
                             3 => {
+                                // SBC
                                 let r8: u8 = opcode & 0b111;
                                 let c_save: u8 = self.get_flag_c();
                                 let left: u8 = self.registers.a;
@@ -576,12 +685,64 @@ impl GameBoy {
                             0b0001 => {
                                 // POP r16
                                 let r16 = (opcode >> 4) & 0b11;
-                                let lsb = self.memory.read(self.registers.sp);
+                                let mask;
+                                if r16 == 3 {
+                                    mask = 0xF0
+                                } else {
+                                    mask = 0xFF
+                                }
+                                let lsb = self.memory.read(self.registers.sp) & mask;
                                 self.registers.sp += 1;
                                 let msb = self.memory.read(self.registers.sp);
                                 self.registers.sp += 1;
                                 self.set_r16_group_3(r16, util::unsigned_16(msb, lsb));
                                 Some(3)
+                            }
+                            0b0101 => {
+                                // PUSH r16
+                                let r16 = (opcode >> 4) & 0b11;
+                                let r16_value = self.get_r16_group_3(r16);
+                                let mask;
+                                if r16 == 3 {
+                                    mask = 0xF0
+                                } else {
+                                    mask = 0xFF
+                                }
+                                self.registers.sp -= 1;
+                                self.memory.write(self.registers.sp, util::msb(r16_value));
+                                self.registers.sp -= 1;
+                                self.memory
+                                    .write(self.registers.sp, util::lsb(r16_value) & mask);
+                                Some(3)
+                            }
+                            0b1001 => {
+                                match (opcode >> 4) & 0b11 {
+                                    0 => {
+                                        // RET
+                                        let lsb = self.memory.read(self.registers.sp);
+                                        self.registers.sp += 1;
+                                        let msb = self.memory.read(self.registers.sp);
+                                        self.registers.sp += 1;
+                                        self.registers.pc = unsigned_16(msb, lsb);
+                                        Some(4)
+                                    }
+                                    1 => {
+                                        // RETI
+                                        let lsb = self.memory.read(self.registers.sp);
+                                        self.registers.sp += 1;
+                                        let msb = self.memory.read(self.registers.sp);
+                                        self.registers.sp += 1;
+                                        self.registers.pc = unsigned_16(msb, lsb);
+                                        self.ime = true; // todo dispatch on next cycle
+                                        Some(4)
+                                    }
+                                    2 => {
+                                        // JP HL
+                                        self.registers.pc = self.get_hl();
+                                        Some(1)
+                                    }
+                                    _ => None,
+                                }
                             }
                             _ => {
                                 match opcode & 0b11100111 {
@@ -606,14 +767,168 @@ impl GameBoy {
                                             Some(2)
                                         }
                                     }
+                                    0b110_00_100 => {
+                                        let lsb = self.memory.read(self.registers.pc);
+                                        self.registers.pc += 1;
+                                        let msb = self.memory.read(self.registers.pc);
+                                        self.registers.pc += 1;
+                                        let condition;
+                                        match (opcode >> 3) & 0b11 {
+                                            0 => condition = self.get_flag_z() == 0,
+                                            1 => condition = self.get_flag_z() != 0,
+                                            2 => condition = self.get_flag_c() == 0,
+                                            3 => condition = self.get_flag_c() != 0,
+                                            _ => {
+                                                panic!("not possible condition - CALL conditional")
+                                            }
+                                        }
+                                        if condition {
+                                            self.registers.sp -= 1;
+                                            self.memory.write(
+                                                self.registers.sp,
+                                                util::msb(self.registers.pc),
+                                            );
+                                            self.registers.sp -= 1;
+                                            self.memory.write(
+                                                self.registers.sp,
+                                                util::lsb(self.registers.pc),
+                                            );
+                                            self.registers.pc = util::unsigned_16(msb, lsb);
+                                            Some(6)
+                                        } else {
+                                            Some(3)
+                                        }
+                                    }
+                                    0b110_00_010 => {
+                                        let condition;
+                                        match (opcode >> 3) & 0b11 {
+                                            // JP conditional
+                                            0 => condition = self.get_flag_z() == 0,
+                                            1 => condition = self.get_flag_z() != 0,
+                                            2 => condition = self.get_flag_c() == 0,
+                                            3 => condition = self.get_flag_c() != 0,
+                                            _ => panic!("not possible condition - JP conditional"),
+                                        }
+                                        let lsb = self.memory.read(self.registers.pc);
+                                        self.registers.pc += 1;
+                                        let msb = self.memory.read(self.registers.pc);
+                                        self.registers.pc += 1;
+                                        if condition {
+                                            // JP conditional, u16
+                                            self.registers.pc = util::unsigned_16(msb, lsb);
+                                            Some(4)
+                                        } else {
+                                            Some(3)
+                                        }
+                                    }
                                     _ => {
                                         match opcode & 0b11_000_111 {
                                             0b11_000_110 => {
                                                 // ALU A, u8
                                                 match (opcode >> 3) & 0b111 {
+                                                    0 => {
+                                                        // ADD
+                                                        let left: u8 = self.registers.a;
+                                                        let right: u8 =
+                                                            self.memory.read(self.registers.pc);
+                                                        self.registers.pc += 1;
+                                                        self.registers.a += right;
+                                                        self.set_flag_z(self.registers.a == 0);
+                                                        self.set_flag_n(false);
+                                                        self.set_flag_h(
+                                                            ((left & 0xF) + (right & 0xF)) > 0xF,
+                                                        );
+                                                        self.set_flag_c(
+                                                            ((left as u16) + (right as u16)) > 0xFF,
+                                                        );
+                                                        Some(2)
+                                                    }
+                                                    1 => {
+                                                        // ADC
+                                                        let c_save: u8 = self.get_flag_c();
+                                                        let left: u8 = self.registers.a;
+                                                        let right: u8 =
+                                                            self.memory.read(self.registers.pc);
+                                                        self.registers.pc += 1;
+                                                        self.registers.a += right + c_save;
+                                                        self.set_flag_z(self.registers.a == 0);
+                                                        self.set_flag_n(false);
+                                                        self.set_flag_h(
+                                                            ((left & 0xF) + (right & 0xF) + c_save)
+                                                                > 0xF,
+                                                        );
+                                                        self.set_flag_c(
+                                                            ((left as u16)
+                                                                + (right as u16)
+                                                                + (c_save as u16))
+                                                                > 0xFF,
+                                                        );
+                                                        Some(2)
+                                                    }
+                                                    2 => {
+                                                        // SUB
+                                                        let left: u8 = self.registers.a;
+                                                        let right: u8 =
+                                                            self.memory.read(self.registers.pc);
+                                                        self.registers.pc += 1;
+                                                        self.registers.a -= right;
+                                                        self.set_flag_z(self.registers.a == 0);
+                                                        self.set_flag_n(true);
+                                                        self.set_flag_h(
+                                                            ((left & 0xF) - (right & 0xF)) > 0xF,
+                                                        );
+                                                        self.set_flag_c(
+                                                            ((left as u16) - (right as u16)) > 0xFF,
+                                                        );
+                                                        Some(1)
+                                                    }
+                                                    3 => {
+                                                        // SBC
+                                                        let c_save: u8 = self.get_flag_c();
+                                                        let left: u8 = self.registers.a;
+                                                        let right: u8 =
+                                                            self.memory.read(self.registers.pc);
+                                                        self.registers.pc += 1;
+                                                        self.registers.a = left - right - c_save;
+                                                        self.set_flag_z(self.registers.a == 0);
+                                                        self.set_flag_n(true);
+                                                        self.set_flag_h(
+                                                            ((left & 0xF) - (right & 0xF) - c_save)
+                                                                > 0xF,
+                                                        );
+                                                        self.set_flag_c(
+                                                            ((left as u16)
+                                                                - (right as u16)
+                                                                - (c_save as u16))
+                                                                > 0xFF,
+                                                        );
+                                                        Some(1)
+                                                    }
+                                                    4 => {
+                                                        // AND
+                                                        self.registers.a &=
+                                                            self.memory.read(self.registers.pc);
+                                                        self.registers.pc += 1;
+                                                        self.set_flag_z(self.registers.a == 0);
+                                                        self.set_flag_n(false);
+                                                        self.set_flag_h(true);
+                                                        self.set_flag_c(false);
+                                                        Some(2)
+                                                    }
                                                     5 => {
                                                         // XOR
                                                         self.registers.a ^=
+                                                            self.memory.read(self.registers.pc);
+                                                        self.registers.pc += 1;
+                                                        self.set_flag_z(self.registers.a == 0);
+                                                        self.set_flag_n(false);
+                                                        self.set_flag_h(false);
+                                                        self.set_flag_c(false);
+                                                        Some(2)
+                                                    }
+                                                    6 => {
+                                                        // OR
+                                                        self.registers.a |=
                                                             self.memory.read(self.registers.pc);
                                                         self.registers.pc += 1;
                                                         self.set_flag_z(self.registers.a == 0);
@@ -658,6 +973,23 @@ impl GameBoy {
                                                 self.registers.pc = util::unsigned_16(0x00, exp);
                                                 Some(4)
                                             }
+                                            0b11_000_011 => {
+                                                match (opcode >> 3) & 0b111 {
+                                                    0 => {
+                                                        // JP unconditional, u16
+                                                        let lsb =
+                                                            self.memory.read(self.registers.pc);
+                                                        self.registers.pc += 1;
+                                                        let msb =
+                                                            self.memory.read(self.registers.pc);
+                                                        self.registers.pc += 1;
+                                                        self.registers.pc =
+                                                            util::unsigned_16(msb, lsb);
+                                                        Some(4)
+                                                    }
+                                                    _ => None,
+                                                }
+                                            }
                                             _ => None,
                                         }
                                     }
@@ -673,6 +1005,10 @@ impl GameBoy {
 
     fn get_hl(&self) -> u16 {
         util::unsigned_16(self.registers.h, self.registers.l)
+    }
+
+    fn get_af(&self) -> u16 {
+        util::unsigned_16(self.registers.a, self.registers.f)
     }
 
     fn set_hl(&mut self, value: u16) {
@@ -735,14 +1071,14 @@ impl GameBoy {
             0 => self.get_bc(), //TODO implement me
             1 => self.get_de(), // TODO implement me
             2 => {
-                let ret = self.get_hl();
-                self.set_hl(ret + 1);
-                ret
+                let hl = self.get_hl();
+                self.set_hl(hl + 1);
+                hl
             }
             3 => {
-                let ret = self.get_hl();
-                self.set_hl(ret - 1);
-                ret
+                let hl = self.get_hl();
+                self.set_hl(hl - 1);
+                hl
             }
             _ => panic!("get_r16_group_2 recieved illegal value"),
         }
@@ -754,6 +1090,16 @@ impl GameBoy {
             1 => self.get_de(),
             2 => self.get_hl(),
             3 => self.registers.sp,
+            _ => panic!("get_r16_group_1 recieved illegal value"),
+        }
+    }
+
+    fn get_r16_group_3(&mut self, r16: u8) -> u16 {
+        match r16 {
+            0 => self.get_bc(),
+            1 => self.get_de(),
+            2 => self.get_hl(),
+            3 => self.get_af(),
             _ => panic!("get_r16_group_1 recieved illegal value"),
         }
     }

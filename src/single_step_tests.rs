@@ -4,8 +4,8 @@
 
 #[cfg(test)]
 mod single_step_test {
-    use crate::gb;
     use crate::memory::Memory;
+    use crate::{gb, memory};
     use std::ffi::OsString;
     use std::{fs, path::PathBuf};
     type SingleStepTestsRam = Vec<(u16, u8)>;
