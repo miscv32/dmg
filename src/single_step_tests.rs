@@ -1,13 +1,9 @@
 // https://github.com/SingleStepTests/sm83
-
-// TODO rewrite so that we don't just exit on first failure
-
-#[cfg(test)]
 mod single_step_test {
+    use crate::gb;
     use crate::memory::Memory;
-    use crate::{gb, memory};
-    use std::ffi::OsString;
-    use std::{fs, path::PathBuf};
+    use std::{fs, path::Path, path::PathBuf};
+
     type SingleStepTestsRam = Vec<(u16, u8)>;
 
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -84,6 +80,14 @@ mod single_step_test {
         }
     }
 
+    #[datatest::files("sm83/v1", {
+        path in r"^(.*).json",
+    })]
+    fn datatest_run_test_file(path: &Path) {
+        let mut gameboy = gb::init();
+        run_test_file(&mut gameboy, &PathBuf::from(path));
+    }
+
     fn run_test_file(gameboy: &mut gb::GameBoy, path: &PathBuf) {
         println!("{:?}", path.file_name().unwrap());
         let file_contents: String = fs::read_to_string(path).expect("Could not read test file");
@@ -97,43 +101,6 @@ mod single_step_test {
         } else {
             println!("Could not parse test JSON as JSON array");
             assert!(false);
-        }
-    }
-
-    // #[test]
-    fn _debug_run_test() {
-        let mut gameboy = gb::init();
-
-        let path_strings: Vec<&str> = vec![
-            "./sm83/v1/e8.json",
-            "./sm83/v1/e0.json",
-            "./sm83/v1/00.json",
-            "./sm83/v1/76.json",
-        ];
-        for path_string in path_strings {
-            let path: PathBuf = PathBuf::from(OsString::from(path_string));
-            run_test_file(&mut gameboy, &path);
-        }
-    }
-
-    #[test]
-    fn _run_all_tests() {
-        let mut gameboy = gb::init();
-
-        match fs::read_dir("./sm83/v1/") {
-            Ok(value) => {
-                let test_paths: fs::ReadDir = value;
-                let mut i: u32 = 0;
-                for test_path in test_paths {
-                    i += 1;
-                    print!("running test {}: ", i);
-                    run_test_file(
-                        &mut gameboy,
-                        &test_path.expect("Could not read path").path(),
-                    )
-                }
-            }
-            Err(_) => assert!(false),
         }
     }
 }
