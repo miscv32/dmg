@@ -1,4 +1,5 @@
 // https://github.com/SingleStepTests/sm83
+#[cfg(test)]
 mod single_step_test {
     use crate::gb;
     use crate::memory::Memory;
